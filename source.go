@@ -21,7 +21,7 @@ func NewSerialSource(dev string, speed int) *SerialSource {
 	c := &serial.Config{Name: dev, Baud: speed}
 	u, err := serial.OpenPort(c)
 	if err != nil {
-		fmt.Println("Impossible to open port %v (speed=%v)", dev, speed)
+		fmt.Printf("Impossible to open port %v (speed=%v)\n", dev, speed)
 		fmt.Println(err)
 		os.Exit(1)
 	}

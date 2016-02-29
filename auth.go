@@ -15,7 +15,7 @@ import (
 )
 
 type Auth interface {
-	request(string) (bool,error)
+	request(string) auth_response
 }
 
 type auth_response struct {

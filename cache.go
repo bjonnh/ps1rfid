@@ -6,13 +6,19 @@ import (
 	"github.com/boltdb/bolt"
 )
 
-type CacheDB struct {
+type CacheDB interface {
+	Close() error
+	checkCacheDBForTag(string) bool
+	addTagToCacheDB(string) 
+}
+
+type BoltDB struct {
 	database *bolt.DB
 	bucket string
 }
 
-func NewCacheDb(filename string, bucketname string) *CacheDB {
-	db := CacheDB{}
+func NewBoltDb(filename string, bucketname string) *BoltDB {
+	db := BoltDB{}
 	var database *bolt.DB
 	
 	// Create/open the database
@@ -45,11 +51,11 @@ func NewCacheDb(filename string, bucketname string) *CacheDB {
 	return &db
 }
 
-func (db *CacheDB) Close() error {
+func (db *BoltDB) Close() error {
 	return db.database.Close()
 }
 
-func (db *CacheDB) checkCacheDBForTag(tag string) bool {
+func (db *BoltDB) checkCacheDBForTag(tag string) bool {
 	val := ""
 	db.database.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(db.bucket))
@@ -63,7 +69,7 @@ func (db *CacheDB) checkCacheDBForTag(tag string) bool {
 	return false
 }
 
-func (db *CacheDB) addTagToCacheDB(tag string) {
+func (db *BoltDB) addTagToCacheDB(tag string) {
 	db.database.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(db.bucket))
 		err := b.Put([]byte(tag), []byte(tag))

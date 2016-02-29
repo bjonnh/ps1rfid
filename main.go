@@ -5,33 +5,9 @@ import (
 	"net/http"
 )
 
-var db_filename string = "rfid-tags.db"
-var bucket_name string = "RFIDBucket"
-var ps1auth_url = "https://members.pumpingstationone.org/rfid/check/FrontDoor/"
-
 func main() {
 	var code string
-	// Now open the cache db to check if it's already here
-	// And get an object that allows to play in the bucket
-	cacheDB := NewCacheDb(db_filename, bucket_name)
-
-	// This is for a normal behavior
-	
-	board := NewBeagleBone("beaglebone", "splate", "P9_11")
-	source := NewSerialSource("/dev/ttyUSB0", 9600)
-	publisher := NewZMQPublisher()
-	auth := NewPS1Auth(ps1auth_url)
-
-	// This is a test behavior with all functions being in debug mode
-
-	//board := NewFakeBoard() 
-	//source := NewFakeSource()  // The fake source sends the code YOU'REAFAKE once, then it exits at the second call
-	//publisher := NewFakePublisher() // Writes to STDOUT
-	//auth := NewFakeAuth(auth_response{code:0,msg:"RFID Accepted"}) // Sends the auth_response you want
-	//auth := NewFakeAuth(auth_response{code:1,msg:"RFID Failed"}) 
-	//auth := NewFakeAuth(auth_response{code:2,msg:"RFID Not found"})
-	//auth := NewFakeAuth(auth_response{code:3,msg:"Auth system error"})
-
+	config()
 	// Tell the board system to use this publisher
 	board.setPublisher(publisher)
 	// Configure the local API (/ for the last code, /open and /close)

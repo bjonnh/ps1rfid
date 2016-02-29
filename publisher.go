@@ -15,6 +15,7 @@ type ZMQPublisher struct {
 }
 
 func NewZMQPublisher() *ZMQPublisher {
+	
 	publisher := ZMQPublisher{}
 	//Configure ZMQ publisher
 	_publisher, err := zmq.NewSocket(zmq.PUB)
