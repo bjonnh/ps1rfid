@@ -1,73 +1,41 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
-	"github.com/hybridgroup/gobot"
-	"github.com/hybridgroup/gobot/platforms/beaglebone"
-	"github.com/hybridgroup/gobot/platforms/gpio"
-	"github.com/tarm/goserial"
-	"io"
 	"net/http"
-	"os"
-	"time"
-	zmq "github.com/pebbe/zmq4"
-	"github.com/boltdb/bolt"
 )
 
-var cacheDB *bolt.DB
-
-func checkCacheDBForTag(tag string) bool {
-	val := ""
-	cacheDB.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("RFIDBucket"))
-		val = string(b.Get([]byte(tag)))
-		return nil
-	})
-
-	if val != "" {
-		return true
-	}
-
-	return false
-}
-
-func addTagToCacheDB(tag string) {
-	cacheDB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("RFIDBucket"))
-		err := b.Put([]byte(tag), []byte(tag))
-		return err
-	})
-}
-
-func openDoor(sp gpio.DirectPinDriver, publisher *zmq.Socket) {
-	sp.DigitalWrite(1)
-	publisher.SendMessage("door.state.unlock", "Door Unlocked")
-	gobot.After(5*time.Second, func() {
-		sp.DigitalWrite(0)
-		publisher.SendMessage("door.state.lock", "Door Locked")
-	})
-}
+var db_filename string = "rfid-tags.db"
+var bucket_name string = "RFIDBucket"
+var ps1auth_url = "https://members.pumpingstationone.org/rfid/check/FrontDoor/"
 
 func main() {
 	var code string
-	beagleboneAdaptor := beaglebone.NewBeagleboneAdaptor("beaglebone")
-	//NewDirectPinDriver returns a pointer - this wasn't immediately obvious to me
-	splate := gpio.NewDirectPinDriver(beagleboneAdaptor, "splate", "P9_11")
-	c := &serial.Config{Name: "/dev/ttyUSB0", Baud: 9600}
-	u, err := serial.OpenPort(c)
-	if err != nil {
-		fmt.Print(err)
-		os.Exit(1)
-	}
-	//Configure ZMQ publisher
-	publisher, err := zmq.NewSocket(zmq.PUB)
-	if err != nil {
-		fmt.Print(err)
-		os.Exit(1)
-	}
-	publisher.Bind("tcp://*:5556")
-	//Configure ZMQ publisher
+	// Now open the cache db to check if it's already here
+	// And get an object that allows to play in the bucket
+	cacheDB := NewCacheDb(db_filename, bucket_name)
+
+	// This is for a normal behavior
+	
+	board := NewBeagleBone("beaglebone", "splate", "P9_11")
+	source := NewSerialSource("/dev/ttyUSB0", 9600)
+	publisher := NewZMQPublisher()
+	auth := NewPS1Auth(ps1auth_url)
+
+	// This is a test behavior with all functions being in debug mode
+
+	//board := NewFakeBoard() 
+	//source := NewFakeSource()  // The fake source sends the code YOU'REAFAKE once, then it exits at the second call
+	//publisher := NewFakePublisher() // Writes to STDOUT
+	//auth := NewFakeAuth(auth_response{code:0,msg:"RFID Accepted"}) // Sends the auth_response you want
+	//auth := NewFakeAuth(auth_response{code:1,msg:"RFID Failed"}) 
+	//auth := NewFakeAuth(auth_response{code:2,msg:"RFID Not found"})
+	//auth := NewFakeAuth(auth_response{code:3,msg:"Auth system error"})
+
+	// Tell the board system to use this publisher
+	board.setPublisher(publisher)
+	// Configure the local API (/ for the last code, /open and /close)
+	
 	go http.HandleFunc("/", func (w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Code: "))
 		w.Write([]byte(code))
@@ -75,70 +43,51 @@ func main() {
 	// the anonymous function here allows us to call openDoor with splate remaining in scope
 	go http.HandleFunc("/open", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Okay"))
-		openDoor(*splate, publisher)
+		board.openDoor()
 	})
+	
+	go http.HandleFunc("/close", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Okay"))
+		board.closeDoor()
+	})
+
 	go http.ListenAndServe(":8080", nil)
-	buf := make([]byte, 16)
+
+	var resp auth_response
 	for {
-		n, err := io.ReadFull(u, buf)
-		if err != nil {
-			fmt.Print(err)
-			os.Exit(1)
-		}
-		// We need to strip the stop and start bytes from the tag, so we only assign a certain range of the slice
-		code = string(buf[1 : n-3])
-
-  		// Now open the cache db to check if it's already here
-        cacheDB, err = bolt.Open("rfid-tags.db", 0600, nil)
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		cacheDB.Update(func(tx *bolt.Tx) error {
-			_, err := tx.CreateBucketIfNotExists([]byte("RFIDBucket"))
-			if err != nil {
-				return fmt.Errorf("create bucket: %s", err)
-			}
-			return nil
-		})
-
+		code = source.getFullCode()				
 		// Before checking the site for the code, let's check our cache
-        if checkCacheDBForTag(code) == false {
-			var request bytes.Buffer
-			request.WriteString("https://members.pumpingstationone.org/rfid/check/FrontDoor/")
-			request.WriteString(code)
-			resp, err := http.Get(request.String())
-			if err != nil {
-				fmt.Printf("Whoops!")
-				publisher.SendMessage("door.rfid.error", fmt.Sprintf("Auth Server Error: %s", err))
-				os.Exit(1)
-			}
-			if resp.StatusCode == 200 {
-
+		if cacheDB.checkCacheDBForTag(code) == false {
+			resp = auth.request(code)
+			fmt.Printf("I received response: %s\n",resp)
+			if resp.code == 0 {
 				// We got 200 back, so we're good to add this
 				// tag to the cache
-				addTagToCacheDB(code)
-
+				cacheDB.addTagToCacheDB(code)
+				
 				fmt.Println("Success!")
-				publisher.SendMessage("door.rfid.accept", "RFID Accepted")
-				code = ""
-				openDoor(*splate, publisher)
-			} else if resp.StatusCode == 403 {
+				publisher.SendMessage("door.rfid.accept", resp.msg)
+				board.openDoor()
+			} else if resp.code == 1 {
 				fmt.Println("Membership status: Expired")
-				publisher.SendMessage("door.rfid.deny", "RFID Denied")
-			} else {
+				publisher.SendMessage("door.rfid.deny", resp.msg)
+			} else if resp.code == 2 {
 				fmt.Println("Code not found")
-				publisher.SendMessage("door.rfid.deny", "RFID not found")
+				publisher.SendMessage("door.rfid.deny", resp.msg)
+			} else if resp.code == 3 {
+				fmt.Println("Auth server error")
+				publisher.SendMessage("door.rfid.error", resp.msg)
+			} else {
+				fmt.Println("Unknown Auth error")
+				publisher.SendMessage("door.rfid.snafu", resp.msg)
 			}
   		} else {
 			// If we're here, we found the tag in the cache, so
 			// let's just go and open the door for 'em
 			fmt.Println("Success!")
 			publisher.SendMessage("door.rfid.accept", "RFID Accepted")
-			code = ""
-			openDoor(*splate, publisher)
-		}
-
-    	cacheDB.Close()
+			board.openDoor()
+		}	
 	}
+	cacheDB.Close()
 }

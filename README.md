@@ -1,3 +1,4 @@
+
 # Client-side RFID authentication (and general access control) for Pumping Station: One
 
 This system is built on a BeagleBone Black and Sparkfun's USB board for RFID readers for hardware, and PS1Auth's server-side RFID authentication on the backend.
@@ -22,19 +23,23 @@ This while take a while.
 `sudo apt-get install libzmq3`  
 `sudo apt-get install golang`  
 
+*Archlinux*
+`pacman -S go zeromq`
+
 *Golang*  
 `go get github.com/pebbe/zmq4`  
 `go get github.com/hybridgroup/gobot`  
 `go get github.com/hybridgroup/gobot/platforms/beaglebone`  
 `go get github.com/hybridgroup/gobot/platforms/gpio`  
 `go get github.com/tarm/goserial`  
+`go get github.com/boltdb/bolt`
 
 Cloning this repo to your BBB (and building an executable) is the next step. The primary challenges:
 
 * Launching application on startup of the BBB
 * Enabling non-root access to the GPIO
 
-First, you'll want to create a user to run the service. I created a user 'rfid' 
+isoFirst, you'll want to create a user to run the service. I created a user 'rfid' 
 
 `$ sudo adduser rfid`
 
